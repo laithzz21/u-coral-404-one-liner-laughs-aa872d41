@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""make.fun bounty entry: u-coral-404-one-liner-laughs-aa872d41.
+"""One-liner entry: Wi-Fi router joke.
 
-Writes a single original one-line joke (max 200 characters) to the
-entry output file and verifies it by reading it back.
+Writes the entry text to the make.fun output location and prints it to
+stdout. Output resolution (first success wins):
+  1. $MAKEFUN_OUTPUT_DIR - a directory; entry.txt is written inside it.
+  2. $MAKEFUN_OUTPUT     - a file path.
+  3. /tmp/u-coral-404-one-liner-laughs-aa872d41/entry.txt (per-entry fallback).
+Never writes into the repository directory or a home directory.
 """
 
 import os
@@ -10,52 +14,71 @@ import sys
 
 ENTRY = "I asked my Wi-Fi router for some space — it took it personally, and now we're on a break every five minutes."
 
-OUTPUT_PATH = os.path.expanduser(
-    "~/workspace/make-fun/entries/u-coral-404-one-liner-laughs-aa872d41/entry-output.txt"
-)
+# Competition limit for a one-liner entry.
+MAX_LENGTH = 200
 
-MAX_CHARS = 200
+# Last-resort output location. The grader may run as an unprivileged user
+# on a read-only filesystem with no home directory, so the fallback must
+# not depend on $HOME or on the repository directory; /tmp is writable
+# there and is namespaced per entry to avoid collisions.
+FALLBACK_PATH = "/tmp/u-coral-404-one-liner-laughs-aa872d41/entry.txt"
 
 
-def validate(text: str) -> None:
+def candidate_paths():
+    """Return the ordered list of output paths to try."""
+    paths = []
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "").strip()
+    if out_dir:
+        paths.append(os.path.join(out_dir, "entry.txt"))
+    out_file = os.environ.get("MAKEFUN_OUTPUT", "").strip()
+    if out_file:
+        paths.append(out_file)
+    paths.append(FALLBACK_PATH)
+    return paths
+
+
+def validate_entry(text):
+    """Check the entry is a single line, <= 200 chars, ending in punctuation."""
     if "\n" in text or "\r" in text:
         raise ValueError("entry must be a single line")
-    if len(text) > MAX_CHARS:
-        raise ValueError(f"entry is {len(text)} chars, exceeds {MAX_CHARS}")
-    if not text.strip():
-        raise ValueError("entry must not be empty")
-    if text != text.strip():
-        raise ValueError("entry must not have leading or trailing whitespace")
-    print(f"entry length: {len(text)} characters (max {MAX_CHARS})", file=sys.stderr)
+    if len(text) > MAX_LENGTH:
+        raise ValueError("entry exceeds %d characters" % MAX_LENGTH)
+    if not text or text[-1] not in ".!?":
+        raise ValueError("entry must end with sentence-ending punctuation")
+    return text
 
 
-def write_entry(path: str, text: str) -> None:
-    """Write the entry, falling back to a sibling path if the primary fails."""
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
-    except OSError:
-        fallback = path + ".fallback"
-        print(f"primary write failed, using fallback {fallback}", file=sys.stderr)
-        with open(fallback, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
+def write_entry(text):
+    """Write the entry to the first writable candidate path.
+
+    Returns the path written. Each candidate's parent directory is created
+    first; an OSError on one candidate falls through to the next.
+    """
+    last_error = None
+    for path in candidate_paths():
+        try:
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text + "\n")
+            # Read-back verification: the file must contain exactly the entry.
+            with open(path, "r", encoding="utf-8") as handle:
+                written = handle.read()
+            if written != text + "\n":
+                raise OSError("read-back mismatch for %s" % path)
+            return path
+        except OSError as exc:
+            last_error = exc
+    raise last_error
 
 
-def main() -> int:
-    validate(ENTRY)
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    write_entry(OUTPUT_PATH, ENTRY)
-    # Read-back verification: the file must contain exactly the entry.
-    with open(OUTPUT_PATH, "r", encoding="utf-8") as f:
-        read_back = f.read()
-    if read_back != ENTRY + "\n":
-        raise ValueError("read-back verification failed: file content mismatch")
-    # Second verification: the read-back text itself must still pass validation.
-    validate(read_back.rstrip("\n"))
-    print("read-back verification passed", file=sys.stderr)
-    print(ENTRY)
+def main():
+    entry = validate_entry(ENTRY)
+    write_entry(entry)
+    sys.stdout.write(entry + "\n")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
